@@ -26,7 +26,6 @@
 #include <linux/file.h>
 #include <linux/fdtable.h>
 #include <linux/mm.h>
-#include <linux/mm_inline.h>
 #include <linux/vmacache.h>
 #include <linux/stat.h>
 #include <linux/fcntl.h>
@@ -77,16 +76,6 @@ int suid_dumpable = 0;
 
 static LIST_HEAD(formats);
 static DEFINE_RWLOCK(binfmt_lock);
-
-#define ZYGOTE32_BIN "/system/bin/app_process32"
-#define ZYGOTE64_BIN "/system/bin/app_process64"
-static struct signal_struct *zygote32_sig;
-static struct signal_struct *zygote64_sig;
-
-bool task_is_zygote(struct task_struct *p)
-{
-	return p->signal == zygote32_sig || p->signal == zygote64_sig;
-}
 
 void __register_binfmt(struct linux_binfmt * fmt, int insert)
 {
@@ -301,7 +290,7 @@ static int __bprm_mm_init(struct linux_binprm *bprm)
 	struct vm_area_struct *vma = NULL;
 	struct mm_struct *mm = bprm->mm;
 
-	bprm->vma = vma = vm_area_alloc();
+	bprm->vma = vma = kmem_cache_zalloc(vm_area_cachep, GFP_KERNEL);
 	if (!vma)
 		return -ENOMEM;
 
@@ -337,7 +326,7 @@ err:
 	up_write(&mm->mmap_sem);
 err_free:
 	bprm->vma = NULL;
-	vm_area_free(vma);
+	kmem_cache_free(vm_area_cachep, vma);
 	return err;
 }
 
@@ -1041,7 +1030,6 @@ static int exec_mmap(struct mm_struct *mm)
 	active_mm = tsk->active_mm;
 	tsk->active_mm = mm;
 	tsk->mm = mm;
-	lru_gen_add_mm(mm);
 	/*
 	 * This prevents preemption while active_mm is being loaded and
 	 * it and mm are being updated, which could cause problems for
@@ -1054,7 +1042,6 @@ static int exec_mmap(struct mm_struct *mm)
 	activate_mm(active_mm, mm);
 	if (IS_ENABLED(CONFIG_ARCH_WANT_IRQS_OFF_ACTIVATE_MM))
 		local_irq_enable();
-	lru_gen_use_mm(mm);
 	tsk->mm->vmacache_seqnum = 0;
 	vmacache_flush(tsk);
 	task_unlock(tsk);
@@ -1168,6 +1155,7 @@ static int de_thread(struct task_struct *tsk)
 		 */
 		tsk->pid = leader->pid;
 		change_pid(tsk, PIDTYPE_PID, task_pid(leader));
+		transfer_pid(leader, tsk, PIDTYPE_TGID);
 		transfer_pid(leader, tsk, PIDTYPE_PGID);
 		transfer_pid(leader, tsk, PIDTYPE_SID);
 
@@ -1855,13 +1843,6 @@ static int __do_execve_file(int fd, struct filename *filename,
 	if (retval < 0)
 		goto out;
 
-	if (is_global_init(current->parent)) {
-		if (unlikely(!strcmp(filename->name, ZYGOTE32_BIN)))
-			zygote32_sig = current->signal;
-		else if (unlikely(!strcmp(filename->name, ZYGOTE64_BIN)))
-			zygote64_sig = current->signal;
-	}
-
 	/* execve succeeded */
 	current->fs->in_exec = 0;
 	current->in_execve = 0;
@@ -1931,6 +1912,15 @@ int do_execve(struct filename *filename,
 #endif
 
     return do_execveat_common(AT_FDCWD, filename, argv, envp, 0);
+}
+	
+int do_execve(struct filename *filename,
+	const char __user *const __user *__argv,
+	const char __user *const __user *__envp)
+{
+	struct user_arg_ptr argv = { .ptr.native = __argv };
+	struct user_arg_ptr envp = { .ptr.native = __envp };
+	return do_execveat_common(AT_FDCWD, filename, argv, envp, 0);
 }
 
 int do_execveat(int fd, struct filename *filename,
