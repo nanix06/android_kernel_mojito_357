@@ -21,7 +21,7 @@ jobs:
       - name: Télécharger le source
         uses: actions/checkout@v4
         with:
-          ref: nanix06/android_kernel_mojito_357
+          ref: 16.2
           fetch-depth: 1
           submodules: recursive
 
