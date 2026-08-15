@@ -1,4 +1,4 @@
-name: Mojito - STRIX-KernelSU 
+name: Build mojito 4.14 - KernelSU Legacy
 
 on:
   workflow_dispatch:
@@ -7,75 +7,281 @@ permissions:
   contents: read
 
 env:
+  KERNEL_REPO: https://github.com/nanix06/android_kernel_mojito_357.git
+  KERNEL_BRANCH: inline-rom
+
   ARCH: arm64
   SUBARCH: arm64
+
   DEFCONFIG: vendor/mojito_defconfig
+
   CROSS_COMPILE: aarch64-linux-gnu-
   CROSS_COMPILE_COMPAT: arm-linux-gnueabi-
 
+  KSU_REPO: https://github.com/backslashxx/KernelSU.git
+  KSU_BRANCH: main
+
 jobs:
   build:
+    name: Build KernelSU Legacy 4.14
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Télécharger le source
+
+      # ------------------------------------------------------------
+      # 1. Checkout kernel
+      # ------------------------------------------------------------
+      - name: Checkout kernel source
         uses: actions/checkout@v4
         with:
+          repository: nanix06/android_kernel_mojito_357
           ref: inline-rom
           fetch-depth: 1
           submodules: recursive
 
-      - name: Installer les dépendances
+      # ------------------------------------------------------------
+      # 2. Dependencies
+      # ------------------------------------------------------------
+      - name: Install build dependencies
         run: |
           sudo apt-get update
+
           sudo apt-get install -y \
-            bc bison build-essential ccache flex git libssl-dev \
-            libelf-dev pahole python3 rsync unzip wget zip \
-            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
-            gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi \
-            clang lld llvm
- 
-      - name: Ajouter backslashxx KernelSU
+            bc \
+            bison \
+            build-essential \
+            ccache \
+            clang \
+            flex \
+            git \
+            libelf-dev \
+            libncurses5-dev \
+            libssl-dev \
+            lld \
+            llvm \
+            pahole \
+            python3 \
+            python3-pip \
+            rsync \
+            unzip \
+            wget \
+            zip \
+            gcc-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu \
+            gcc-arm-linux-gnueabi \
+            binutils-arm-linux-gnueabi
+
+      # ------------------------------------------------------------
+      # 3. Clone KernelSU
+      # ------------------------------------------------------------
+      - name: Clone backslashxx KernelSU
         run: |
           git clone --depth=1 \
-            https://github.com/backslashxx/KernelSU.git KernelSU
-          ln -s ../KernelSU/kernel drivers/kernelsu
-          printf '\nobj-$(CONFIG_KSU) += kernelsu/\n' >> drivers/Makefile
-          printf '\nsource "drivers/kernelsu/Kconfig"\n' >> Kconfig
+            --branch "${KSU_BRANCH}" \
+            "${KSU_REPO}" \
+            KernelSU
 
-      - name: Configurer le noyau
+          test -d KernelSU/kernel
+
+      # ------------------------------------------------------------
+      # 4. Integrate KernelSU into kernel tree
+      # ------------------------------------------------------------
+      - name: Integrate KernelSU
+        shell: bash
+        run: |
+          set -e
+
+          rm -rf drivers/kernelsu
+
+          mkdir -p drivers/kernelsu
+
+          cp -a KernelSU/kernel/. drivers/kernelsu/
+
+          # KernelSU Kbuild
+          if ! grep -q 'obj-\$(CONFIG_KSU) += kernelsu/' drivers/Makefile; then
+            echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+          fi
+
+          # KernelSU Kconfig
+          if ! grep -q 'source "drivers/kernelsu/Kconfig"' Kconfig; then
+            echo 'source "drivers/kernelsu/Kconfig"' >> Kconfig
+          fi
+
+          echo "KernelSU integrated:"
+          ls -la drivers/kernelsu
+
+      # ------------------------------------------------------------
+      # 5. Prepare output directory
+      # ------------------------------------------------------------
+      - name: Prepare build directory
         run: |
           mkdir -p out
-          make O=out ARCH=arm64 \
-            CROSS_COMPILE="$CROSS_COMPILE" \
-            CROSS_COMPILE_COMPAT="$CROSS_COMPILE_COMPAT" \
-            CC="clang --target=aarch64-linux-gnu" \
-            LD=ld.lld \
-            AR=llvm-ar \
-            NM=llvm-nm \
-            OBJCOPY=llvm-objcopy \
-            OBJDUMP=llvm-objdump \
-            STRIP=llvm-strip \
-            "$DEFCONFIG"
 
-          ./scripts/config --file out/.config --enable KSU
-          ./scripts/config --file out/.config --disable KSU_KPROBES_KSUD
-          ./scripts/config --file out/.config --set-str CONFIG_LOCALVERSION "-STRIX-Kernel"
-
-          make O=out ARCH=arm64 \
-            CROSS_COMPILE="$CROSS_COMPILE" \
-            CROSS_COMPILE_COMPAT="$CROSS_COMPILE_COMPAT" \
-            CC="clang --target=aarch64-linux-gnu" \
-            LD=ld.lld \
-            olddefconfig 
-            grep '^CONFIG_KSU=y$' out/.config
-             
-      - name: Compiler le noyau
+      # ------------------------------------------------------------
+      # 6. Generate original Xiaomi defconfig
+      # ------------------------------------------------------------
+      - name: Generate kernel defconfig
         run: |
-          make -j"$(nproc)" O=out ARCH=arm64 \
-            CROSS_COMPILE="$CROSS_COMPILE" \
-            CROSS_COMPILE_COMPAT="$CROSS_COMPILE_COMPAT" \
-            CC="clang --target=aarch64-linux-gnu" \
+          make O=out \
+            ARCH="${ARCH}" \
+            SUBARCH="${SUBARCH}" \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            CROSS_COMPILE_COMPAT="${CROSS_COMPILE_COMPAT}" \
+            "${DEFCONFIG}"
+
+      # ------------------------------------------------------------
+      # 7. Enable KernelSU + hooks
+      # ------------------------------------------------------------
+      - name: Configure KernelSU hooks
+        shell: bash
+        run: |
+          set -e
+
+          CONFIG=out/.config
+
+          # --------------------------------------------------------
+          # KernelSU
+          # --------------------------------------------------------
+
+          ./scripts/config --file "${CONFIG}" \
+            --enable CONFIG_KSU
+
+          # --------------------------------------------------------
+          # KPROBES
+          # Required for KernelSU legacy hook implementation
+          # --------------------------------------------------------
+
+          ./scripts/config --file "${CONFIG}" \
+            --enable CONFIG_KPROBES
+
+          ./scripts/config --file "${CONFIG}" \
+            --enable CONFIG_HAVE_KPROBES
+
+          ./scripts/config --file "${CONFIG}" \
+            --enable CONFIG_KPROBE_EVENTS
+
+          # --------------------------------------------------------
+          # Kernel modules
+          # --------------------------------------------------------
+
+          ./scripts/config --file "${CONFIG}" \
+            --enable CONFIG_MODULES
+
+          ./scripts/config --file "${CONFIG}" \
+            --enable CONFIG_MODULE_UNLOAD
+
+          # --------------------------------------------------------
+          # Filesystem / namespace support
+          # --------------------------------------------------------
+
+          ./scripts/config --file "${CONFIG}" \
+            --enable CONFIG_NAMESPACES
+
+          ./scripts/config --file "${CONFIG}" \
+            --enable CONFIG_PID_NS
+
+          # --------------------------------------------------------
+          # KernelSU settings
+          # --------------------------------------------------------
+
+          # Do NOT disable KernelSU hooks.
+          #
+          # Some backslashxx KernelSU versions expose:
+          #
+          # CONFIG_KSU_KPROBES_KSUD
+          #
+          # Leave it enabled when available.
+          # --------------------------------------------------------
+
+          if grep -q 'CONFIG_KSU_KPROBES_KSUD' drivers/kernelsu/Kconfig; then
+            ./scripts/config --file "${CONFIG}" \
+              --enable CONFIG_KSU_KPROBES_KSUD
+          fi
+
+          # --------------------------------------------------------
+          # Disable debug options if present
+          # --------------------------------------------------------
+
+          if grep -q 'CONFIG_KSU_DEBUG' drivers/kernelsu/Kconfig; then
+            ./scripts/config --file "${CONFIG}" \
+              --disable CONFIG_KSU_DEBUG
+          fi
+
+          # --------------------------------------------------------
+          # Local kernel version
+          # --------------------------------------------------------
+
+          ./scripts/config --file "${CONFIG}" \
+            --set-str CONFIG_LOCALVERSION "-KernelSU-mojito"
+
+          # --------------------------------------------------------
+          # Resolve dependencies
+          # --------------------------------------------------------
+
+          make O=out \
+            ARCH="${ARCH}" \
+            SUBARCH="${SUBARCH}" \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            CROSS_COMPILE_COMPAT="${CROSS_COMPILE_COMPAT}" \
+            olddefconfig
+
+          echo
+          echo "========== KernelSU CONFIG =========="
+          grep -E \
+            'CONFIG_KSU=|CONFIG_KPROBES=|CONFIG_HAVE_KPROBES=|CONFIG_KPROBE_EVENTS=|CONFIG_MODULES=|CONFIG_NAMESPACES=' \
+            out/.config || true
+
+      # ------------------------------------------------------------
+      # 8. Verify required configuration
+      # ------------------------------------------------------------
+      - name: Verify KernelSU configuration
+        shell: bash
+        run: |
+          set -e
+
+          CONFIG=out/.config
+
+          grep -q '^CONFIG_KSU=y$' "${CONFIG}" \
+            || {
+              echo "ERROR: CONFIG_KSU is not enabled"
+              exit 1
+            }
+
+          grep -q '^CONFIG_KPROBES=y$' "${CONFIG}" \
+            || {
+              echo "ERROR: CONFIG_KPROBES is not enabled"
+              exit 1
+            }
+
+          grep -q '^CONFIG_HAVE_KPROBES=y$' "${CONFIG}" \
+            || {
+              echo "ERROR: CONFIG_HAVE_KPROBES is not enabled"
+              exit 1
+            }
+
+          grep -q '^CONFIG_KPROBE_EVENTS=y$' "${CONFIG}" \
+            || {
+              echo "ERROR: CONFIG_KPROBE_EVENTS is not enabled"
+              exit 1
+            }
+
+          echo "KernelSU + KPROBE hooks configuration OK."
+
+      # ------------------------------------------------------------
+      # 9. Build kernel
+      # ------------------------------------------------------------
+      - name: Build kernel
+        shell: bash
+        run: |
+          set -e
+
+          make -j"$(nproc)" \
+            O=out \
+            ARCH="${ARCH}" \
+            SUBARCH="${SUBARCH}" \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            CROSS_COMPILE_COMPAT="${CROSS_COMPILE_COMPAT}" \
+            CC=clang \
             LD=ld.lld \
             AR=llvm-ar \
             NM=llvm-nm \
@@ -83,18 +289,63 @@ jobs:
             OBJDUMP=llvm-objdump \
             STRIP=llvm-strip
 
-      - name: Préparer les fichiers
+      # ------------------------------------------------------------
+      # 10. Verify kernel output
+      # ------------------------------------------------------------
+      - name: Verify kernel image
+        shell: bash
         run: |
-          mkdir -p release
-          cp out/arch/arm64/boot/Image.gz release/ 2>/dev/null || true
-          cp out/arch/arm64/boot/Image.gz-dtb release/ 2>/dev/null || true
-          cp out/arch/arm64/boot/Image release/ 2>/dev/null || true
-          sha256sum release/* > release/SHA256SUMS
+          set -e
 
-      - name: Envoyer l’artefact
+          mkdir -p release
+
+          FOUND=0
+
+          if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
+            cp out/arch/arm64/boot/Image.gz-dtb release/
+            FOUND=1
+          fi
+
+          if [ -f out/arch/arm64/boot/Image.gz ]; then
+            cp out/arch/arm64/boot/Image.gz release/
+            FOUND=1
+          fi
+
+          if [ -f out/arch/arm64/boot/Image ]; then
+            cp out/arch/arm64/boot/Image release/
+            FOUND=1
+          fi
+
+          if [ "${FOUND}" -eq 0 ]; then
+            echo "ERROR: No kernel image produced."
+            exit 1
+          fi
+
+          echo
+          echo "========== BUILD OUTPUT =========="
+          ls -lh release/
+
+      # ------------------------------------------------------------
+      # 11. Save config
+      # ------------------------------------------------------------
+      - name: Save kernel config
+        run: |
+          cp out/.config release/kernel.config
+
+      # ------------------------------------------------------------
+      # 12. Generate checksums
+      # ------------------------------------------------------------
+      - name: Generate SHA256
+        run: |
+          cd release
+          sha256sum * > SHA256SUMS
+
+      # ------------------------------------------------------------
+      # 13. Upload artifact
+      # ------------------------------------------------------------
+      - name: Upload kernel
         uses: actions/upload-artifact@v4
         with:
-          name: Mojito-STRIX-KernelSU
+          name: mojito-4.14-KernelSU
           path: release/
           if-no-files-found: error
-        
