@@ -1,0 +1,100 @@
+name: Mojito - STRIX-KernelSU 
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ARCH: arm64
+  SUBARCH: arm64
+  DEFCONFIG: vendor/mojito_defconfig
+  CROSS_COMPILE: aarch64-linux-gnu-
+  CROSS_COMPILE_COMPAT: arm-linux-gnueabi-
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Télécharger le source
+        uses: actions/checkout@v4
+        with:
+          ref: inline-rom
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Installer les dépendances
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison build-essential ccache flex git libssl-dev \
+            libelf-dev pahole python3 rsync unzip wget zip \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi \
+            clang lld llvm
+ 
+      - name: Ajouter backslashxx KernelSU
+        run: |
+          git clone --depth=1 \
+            https://github.com/backslashxx/KernelSU.git KernelSU
+          ln -s ../KernelSU/kernel drivers/kernelsu
+          printf '\nobj-$(CONFIG_KSU) += kernelsu/\n' >> drivers/Makefile
+          printf '\nsource "drivers/kernelsu/Kconfig"\n' >> Kconfig
+
+      - name: Configurer le noyau
+        run: |
+          mkdir -p out
+          make O=out ARCH=arm64 \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            CROSS_COMPILE_COMPAT="$CROSS_COMPILE_COMPAT" \
+            CC="clang --target=aarch64-linux-gnu" \
+            LD=ld.lld \
+            AR=llvm-ar \
+            NM=llvm-nm \
+            OBJCOPY=llvm-objcopy \
+            OBJDUMP=llvm-objdump \
+            STRIP=llvm-strip \
+            "$DEFCONFIG"
+
+          ./scripts/config --file out/.config --enable KSU
+          ./scripts/config --file out/.config --disable KSU_KPROBES_KSUD
+          ./scripts/config --file out/.config --set-str CONFIG_LOCALVERSION "-STRIX-Kernel"
+
+          make O=out ARCH=arm64 \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            CROSS_COMPILE_COMPAT="$CROSS_COMPILE_COMPAT" \
+            CC="clang --target=aarch64-linux-gnu" \
+            LD=ld.lld \
+            olddefconfig 
+            grep '^CONFIG_KSU=y$' out/.config
+             
+      - name: Compiler le noyau
+        run: |
+          make -j"$(nproc)" O=out ARCH=arm64 \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            CROSS_COMPILE_COMPAT="$CROSS_COMPILE_COMPAT" \
+            CC="clang --target=aarch64-linux-gnu" \
+            LD=ld.lld \
+            AR=llvm-ar \
+            NM=llvm-nm \
+            OBJCOPY=llvm-objcopy \
+            OBJDUMP=llvm-objdump \
+            STRIP=llvm-strip
+
+      - name: Préparer les fichiers
+        run: |
+          mkdir -p release
+          cp out/arch/arm64/boot/Image.gz release/ 2>/dev/null || true
+          cp out/arch/arm64/boot/Image.gz-dtb release/ 2>/dev/null || true
+          cp out/arch/arm64/boot/Image release/ 2>/dev/null || true
+          sha256sum release/* > release/SHA256SUMS
+
+      - name: Envoyer l’artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mojito-STRIX-KernelSU
+          path: release/
+          if-no-files-found: error
+        
