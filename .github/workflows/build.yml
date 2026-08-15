@@ -9,7 +9,8 @@ permissions:
 env:
   ARCH: arm64
   SUBARCH: arm64
-  DEFCONFIG: vendor/mojito_defconfig
+  # Remplacé 'vendor/mojito_defconfig' par le fichier directement présent dans arch/arm64/configs/
+  DEFCONFIG: mojito_defconfig
   CROSS_COMPILE: aarch64-linux-gnu-
   CROSS_COMPILE_COMPAT: arm-linux-gnueabi-
 
@@ -21,7 +22,7 @@ jobs:
       - name: Télécharger le source
         uses: actions/checkout@v4
         with:
-          ref: 16.2
+          ref: inline-rom
           fetch-depth: 1
           submodules: recursive
 
@@ -34,7 +35,7 @@ jobs:
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
             gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi \
             clang lld llvm
- 
+
       - name: Ajouter backslashxx KernelSU
         run: |
           git clone --depth=1 \
@@ -60,7 +61,7 @@ jobs:
 
           ./scripts/config --file out/.config --enable KSU
           ./scripts/config --file out/.config --disable KSU_KPROBES_KSUD
-          ./scripts/config --file out/.config --set-str CONFIG_LOCALVERSION "-STRIX-Kernel"
+          ./scripts/config --file out/.config --set-str CONFIG_LOCALVERSION "-STRIX❄❄"
 
           make O=out ARCH=arm64 \
             CROSS_COMPILE="$CROSS_COMPILE" \
@@ -68,7 +69,7 @@ jobs:
             CC="clang --target=aarch64-linux-gnu" \
             LD=ld.lld \
             olddefconfig 
-            grep '^CONFIG_KSU=y$' out/.config
+          grep '^CONFIG_KSU=y$' out/.config
              
       - name: Compiler le noyau
         run: |
@@ -97,4 +98,3 @@ jobs:
           name: Mojito-STRIX-KernelSU
           path: release/
           if-no-files-found: error
-        
