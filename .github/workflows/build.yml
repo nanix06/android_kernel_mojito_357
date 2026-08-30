@@ -30,28 +30,14 @@ jobs:
             bc bison build-essential ccache flex git libssl-dev \
             libelf-dev pahole python3 rsync unzip wget zip
 
-      - name: Télécharger et installer les Toolchains (Clang & GCC)
+      - name: Télécharger et installer Neutron Clang via Antman
         run: |
-          mkdir -p toolchains
-
-          # 1. Télécharger Clang custom
-          echo "Téléchargement de Clang r563880c..."
-          wget -q https://github.com/bachnxuan/aosp_clang_mirror/releases/download/clang-r563880c-13989888/clang-r563880c.tar.gz -O clang.tar.gz
           mkdir -p toolchains/clang
-          tar -xf clang.tar.gz -C toolchains/clang
-          rm clang.tar.gz
-
-          # 2. Cloner GCC 64-bit (aarch64)
-          echo "Clonage de GCC 64-bit..."
-          git clone --depth=1 -b android12L-release \
-            https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 \
-            toolchains/gcc64
-
-          # 3. Cloner GCC 32-bit (arm)
-          echo "Clonage de GCC 32-bit..."
-          git clone --depth=1 -b android12L-release \
-            https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 \
-            toolchains/gcc32
+          cd toolchains/clang
+          curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
+          chmod +x antman
+          ./antman -S
+          ./antman --patch=glibc
 
       - name: Ajouter backslashxx KernelSU
         run: |
@@ -77,19 +63,19 @@ jobs:
 
       - name: Configurer le noyau
         run: |
-          # Définir les chemins absolus vers les binaires
           TC_DIR="$GITHUB_WORKSPACE/toolchains"
-          export PATH="$TC_DIR/clang/bin:$TC_DIR/gcc64/bin:$TC_DIR/gcc32/bin:$PATH"
+          export PATH="$TC_DIR/clang/bin:$PATH"
 
           mkdir -p out
           make O=out ARCH=arm64 \
             CC=clang \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-android- \
-            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             "$DEFCONFIG"
 
-          # Activation des options KSU et SuSFS
+          # Activation des options
           ./scripts/config --file out/.config --enable KSU
           ./scripts/config --file out/.config --disable KSU_KPROBES_KSUD
           ./scripts/config --file out/.config --enable CONFIG_KSU_SUSFS
@@ -102,27 +88,25 @@ jobs:
           ./scripts/config --file out/.config --enable CONFIG_KSU_SUSFS_SPOOF_UNAME_RELEASE
           ./scripts/config --file out/.config --set-str CONFIG_LOCALVERSION "-STRIX-Kernel-SuSFS"
 
-          # Désactivation explicite du VDSO 32-bit (VDSO32 / COMPAT_VDSO)
-          ./scripts/config --file out/.config --disable CONFIG_VDSO32
-          ./scripts/config --file out/.config --disable CONFIG_COMPAT_VDSO
-
           make O=out ARCH=arm64 \
             CC=clang \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-android- \
-            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             olddefconfig
 
       - name: Compiler le noyau
         run: |
           TC_DIR="$GITHUB_WORKSPACE/toolchains"
-          export PATH="$TC_DIR/clang/bin:$TC_DIR/gcc64/bin:$TC_DIR/gcc32/bin:$PATH"
+          export PATH="$TC_DIR/clang/bin:$PATH"
 
           make -j"$(nproc)" O=out ARCH=arm64 \
             CC=clang \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-android- \
-            CROSS_COMPILE_ARM32=arm-linux-androideabi-
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi-
 
       - name: Préparer les fichiers
         run: |
