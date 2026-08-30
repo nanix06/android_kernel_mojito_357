@@ -1,0 +1,136 @@
+name: Mojito - STRIX-KernelSU 
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ARCH: arm64
+  SUBARCH: arm64
+  DEFCONFIG: vendor/mojito_defconfig
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Télécharger le source du noyau
+        uses: actions/checkout@v4
+        with:
+          ref: inline-rom
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Installer les dépendances système
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison build-essential ccache flex git libssl-dev \
+            libelf-dev pahole python3 rsync unzip wget zip
+
+      - name: Télécharger et installer les Toolchains (Clang & GCC)
+        run: |
+          mkdir -p toolchains
+
+          # 1. Télécharger Clang custom
+          echo "Téléchargement de Clang r563880c..."
+          wget -q https://github.com/bachnxuan/aosp_clang_mirror/releases/download/clang-r563880c-13989888/clang-r563880c.tar.gz -O clang.tar.gz
+          mkdir -p toolchains/clang
+          tar -xf clang.tar.gz -C toolchains/clang
+          rm clang.tar.gz
+
+          # 2. Cloner GCC 64-bit (aarch64)
+          echo "Clonage de GCC 64-bit..."
+          git clone --depth=1 -b android12L-release \
+            https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 \
+            toolchains/gcc64
+
+          # 3. Cloner GCC 32-bit (arm)
+          echo "Clonage de GCC 32-bit..."
+          git clone --depth=1 -b android12L-release \
+            https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 \
+            toolchains/gcc32
+
+      - name: Ajouter backslashxx KernelSU
+        run: |
+          git clone --depth=1 https://github.com/backslashxx/KernelSU.git KernelSU
+          ln -s ../KernelSU/kernel drivers/kernelsu
+          printf '\nobj-$(CONFIG_KSU) += kernelsu/\n' >> drivers/Makefile
+          printf '\nsource "drivers/kernelsu/Kconfig"\n' >> Kconfig
+
+      - name: Télécharger et appliquer les patchs SuSFS (Fork nanix06)
+        run: |
+          git clone --depth=1 -b kernel-4.14 https://github.com/nanix06/susfs4ksu.git susfs
+
+          cp susfs/kernel_patches/fs/susfs.c fs/
+          cp susfs/kernel_patches/include/linux/susfs.h include/linux/
+          cp susfs/kernel_patches/include/linux/susfs_def.h include/linux/
+          cp susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
+
+          patch -p1 --fuzz=3 < susfs/kernel_patches/50_add_susfs_in_kernel-4.14.patch || true
+
+          cd KernelSU
+          patch -p1 < 10_enable_susfs_for_ksu.patch || true
+          cd ..
+
+      - name: Configurer le noyau
+        run: |
+          # Définir les chemins absolus vers les binaires
+          TC_DIR="$GITHUB_WORKSPACE/toolchains"
+          export PATH="$TC_DIR/clang/bin:$TC_DIR/gcc64/bin:$TC_DIR/gcc32/bin:$PATH"
+
+          mkdir -p out
+          make O=out ARCH=arm64 \
+            CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-android- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            "$DEFCONFIG"
+
+          # Activation des options
+          ./scripts/config --file out/.config --enable KSU
+          ./scripts/config --file out/.config --disable KSU_KPROBES_KSUD
+          ./scripts/config --file out/.config --enable CONFIG_KSU_SUSFS
+          ./scripts/config --file out/.config --enable CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT
+          ./scripts/config --file out/.config --enable CONFIG_KSU_SUSFS_SUS_PATH
+          ./scripts/config --file out/.config --enable CONFIG_KSU_SUSFS_SUS_MOUNT
+          ./scripts/config --file out/.config --enable CONFIG_KSU_SUSFS_SUS_KSTAT
+          ./scripts/config --file out/.config --enable CONFIG_KSU_SUSFS_SUS_OVERLAYFS
+          ./scripts/config --file out/.config --enable CONFIG_KSU_SUSFS_TRY_UMOUNT
+          ./scripts/config --file out/.config --enable CONFIG_KSU_SUSFS_SPOOF_UNAME_RELEASE
+          ./scripts/config --file out/.config --set-str CONFIG_LOCALVERSION "-STRIX-Kernel-SuSFS"
+
+          make O=out ARCH=arm64 \
+            CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-android- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            olddefconfig
+
+      - name: Compiler le noyau
+        run: |
+          TC_DIR="$GITHUB_WORKSPACE/toolchains"
+          export PATH="$TC_DIR/clang/bin:$TC_DIR/gcc64/bin:$TC_DIR/gcc32/bin:$PATH"
+
+          make -j"$(nproc)" O=out ARCH=arm64 \
+            CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-android- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi-
+
+      - name: Préparer les fichiers
+        run: |
+          mkdir -p release
+          cp out/arch/arm64/boot/Image.gz release/ 2>/dev/null || true
+          cp out/arch/arm64/boot/Image.gz-dtb release/ 2>/dev/null || true
+          cp out/arch/arm64/boot/Image release/ 2>/dev/null || true
+          sha256sum release/* > release/SHA256SUMS
+
+      - name: Envoyer l’artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mojito-STRIX-KernelSU-SuSFS
+          path: release/
+          if-no-files-found: error
