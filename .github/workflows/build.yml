@@ -9,7 +9,7 @@ permissions:
 env:
   ARCH: arm64
   SUBARCH: arm64
-  DEFCONFIG: vendor/mojito_defconfig
+  DEFCONFIG: mojito_defconfig
 
 jobs:
   build:
@@ -19,7 +19,7 @@ jobs:
       - name: Télécharger le source du noyau
         uses: actions/checkout@v4
         with:
-          ref: inline-rom
+          ref: manual-hook-test
           fetch-depth: 1
           submodules: recursive
 
