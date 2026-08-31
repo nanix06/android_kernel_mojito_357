@@ -46,13 +46,10 @@ jobs:
           printf '\nobj-$(CONFIG_KSU) += kernelsu/\n' >> drivers/Makefile
           printf '\nsource "drivers/kernelsu/Kconfig"\n' >> Kconfig
 
-      - name: Télécharger et appliquer les patchs SuSFS (Fork nanix06)
+      - name: Télécharger et appliquer les patchs SuSFS
         run: |
           git clone --depth=1 -b kernel-4.14 https://github.com/nanix06/susfs4ksu.git susfs
 
-          cp susfs/kernel_patches/fs/susfs.c fs/
-          cp susfs/kernel_patches/include/linux/susfs.h include/linux/
-          cp susfs/kernel_patches/include/linux/susfs_def.h include/linux/
           cp susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
 
           patch -p1 --fuzz=3 < susfs/kernel_patches/50_add_susfs_in_kernel-4.14.patch || true
