@@ -41,7 +41,7 @@ jobs:
 
       - name: Ajouter backslashxx KernelSU
         run: |
-          git clone --depth=1 https://github.com/backslashxx/KernelSU.git KernelSU
+          git clone https://github.com/nanix06/KernelSU-Next.git -b legacy-susfs-v2 KernelSU
           ln -s ../KernelSU/kernel drivers/kernelsu
           printf '\nobj-$(CONFIG_KSU) += kernelsu/\n' >> drivers/Makefile
           printf '\nsource "drivers/kernelsu/Kconfig"\n' >> Kconfig
@@ -50,16 +50,8 @@ jobs:
         run: |
           git clone --depth=1 -b kernel-4.14 https://github.com/nanix06/susfs4ksu.git susfs
 
-          cp susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
-
           patch -p1 --fuzz=3 < susfs/kernel_patches/50_add_susfs_in_kernel-4.14.patch || true
-          patch -p1 --fuzz=3 < susfs/kernel_patches/55_try_umount_for_susfs.patch || true
-          patch -p1 --fuzz=3 < susfs/kernel_patches/20_extra_features_for_ksu.patch || true
-
-          cd KernelSU
-          patch -p1 < 10_enable_susfs_for_ksu.patch || true
-          cd ..
-
+          
       - name: Configurer le noyau
         run: |
           TC_DIR="$GITHUB_WORKSPACE/toolchains"
