@@ -36,6 +36,11 @@
  * found on the VFS inode structure.  This is the default if no getattr inode
  * operation is supplied.
  */
+
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+extern void susfs_generic_fillattr_spoofer(struct inode *inode, struct kstat *stat);
+#endif
+
 void generic_fillattr(struct inode *inode, struct kstat *stat)
 {
 	stat->dev = inode->i_sb->s_dev;
