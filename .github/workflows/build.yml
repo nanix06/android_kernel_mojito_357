@@ -51,6 +51,7 @@ jobs:
           git clone --depth=1 -b kernel-4.14 https://github.com/nanix06/susfs4ksu.git susfs
 
           patch -p1 --fuzz=3 < susfs/kernel_patches/50_add_susfs_in_kernel-4.14.patch || true
+          patch -p1 --fuzz=3 < susfs/kernel_patches/susfs_155_fixed.patch || true
           
       - name: Configurer le noyau
         run: |
