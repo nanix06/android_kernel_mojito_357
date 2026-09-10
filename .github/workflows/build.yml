@@ -42,6 +42,15 @@ jobs:
           ln -s ../KernelSU/kernel drivers/kernelsu
           printf '\nobj-$(CONFIG_KSU) += kernelsu/\n' >> drivers/Makefile
           printf '\nsource "drivers/kernelsu/Kconfig"\n' >> Kconfig
+
+      - name: Ajouter KProfiles
+        run: |
+          git clone --depth=1 \
+            https://github.com/beakthoven/Kprofiles.git \
+            drivers/misc/kprofiles
+
+          printf '\nsource "drivers/misc/kprofiles/Kconfig"\n' >> drivers/misc/Kconfig
+          printf '\nobj-$(CONFIG_KPROFILES) += kprofiles/\n' >> drivers/misc/Makefile  
           
       - name: Télécharger et appliquer les patchs SuSFS
         run: |
@@ -89,6 +98,14 @@ jobs:
           ./scripts/config --file out/.config --enable KSU_SUSFS_SUS_OVERLAYFS
           ./scripts/config --file out/.config --enable KSU_SUSFS_TRY_UMOUNT
           ./scripts/config --file out/.config --enable KSU_SUSFS_SPOOF_UNAME_RELEASE
+
+          # KProfiles
+          ./scripts/config --file out/.config --enable KPROFILES
+          ./scripts/config --file out/.config --set-val KP_DEFAULT_MODE 0
+          ./scripts/config --file out/.config --disable AUTO_KPROFILES_MSM_DRM
+          ./scripts/config --file out/.config --disable AUTO_KPROFILES_MI_DRM
+          ./scripts/config --file out/.config --disable AUTO_KPROFILES_FB
+          ./scripts/config --file out/.config --enable AUTO_KPROFILES_NONE
 
           ./scripts/config --file out/.config \
             --set-str LOCALVERSION "-STRIX❄-SuSFSඞ"
