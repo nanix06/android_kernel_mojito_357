@@ -1,4 +1,4 @@
-name: Mojito - STRIX-KernelSU-SUSFS-hbm
+name: Mojito - STRIX-KernelSU-SUSFS
 
 on:
   workflow_dispatch:
@@ -27,43 +27,47 @@ jobs:
 
       - name: Extraire le diff Anti-Flicker/HBM depuis le kernel InfinityX
         run: |
+          set +e
           git clone --depth=1 -b inline-rom \
             https://github.com/nanix06/kernel_xiaomi_mojito.git /tmp/infinityx-kernel
 
-          echo "== Fichiers du kernel InfinityX mentionnant anti_flicker / hbm / dsi-display-lab =="
-          grep -rlZ -E "anti_flicker|dsi-display-lab|regulator\.63" /tmp/infinityx-kernel \
+          echo "== Fichiers du kernel InfinityX mentionnant anti_flicker / dsi-display-lab / regulator.63 =="
+          grep -rlZ -E "dsi-display-lab|regulator\.63|anti_flicker" /tmp/infinityx-kernel \
             --include=*.c --include=*.h --include=*.dts --include=*.dtsi 2>/dev/null \
             | tr '\0' '\n' | tee /tmp/matched_files.txt
 
           mkdir -p /tmp/patches
-          if [ -s /tmp/matched_files.txt ]; then
-            while IFS= read -r f; do
-              rel="${f#/tmp/infinityx-kernel/}"
-              name="$(echo "$rel" | tr '/' '_')"
-              echo "---- $rel ----"
-              if [ -f "$rel" ]; then
-                diff -u "$rel" "$f" > "/tmp/patches/${name}.diff" 2>/dev/null
-                if [ -s "/tmp/patches/${name}.diff" ]; then
-                  echo "  -> diffère du kernel 357, patch généré : ${name}.diff"
-                else
-                  echo "  -> identique dans les deux kernels (pas la source du problème)"
-                  rm -f "/tmp/patches/${name}.diff"
-                fi
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            rel="${f#/tmp/infinityx-kernel/}"
+            name="$(echo "$rel" | tr '/' '_')"
+            echo "---- $rel ----"
+            if [ -f "$rel" ]; then
+              diff -u "$rel" "$f" > "/tmp/patches/${name}.diff"
+              diffret=$?
+              if [ "$diffret" -eq 1 ] && [ -s "/tmp/patches/${name}.diff" ]; then
+                echo "  -> diffère du kernel 357, patch généré : ${name}.diff"
               else
-                echo "  -> n'existe PAS dans le kernel 357 (fichier absent, à ajouter en entier)"
-                mkdir -p "/tmp/patches/new_files/$(dirname "$rel")"
-                cp "$f" "/tmp/patches/new_files/$rel"
+                echo "  -> identique dans les deux kernels (pas la source du problème)"
+                rm -f "/tmp/patches/${name}.diff"
               fi
-            done < /tmp/matched_files.txt
-          else
-            echo "Aucun fichier trouvé avec ces mots-clés : le nom de l'attribut sysfs est peut-être différent, ou généré dynamiquement (device_create_file avec un nom construit en code)."
-          fi
+            else
+              echo "  -> n'existe PAS dans le kernel 357 (fichier absent, à ajouter en entier)"
+              mkdir -p "/tmp/patches/new_files/$(dirname "$rel")"
+              cp "$f" "/tmp/patches/new_files/$rel"
+            fi
+          done < /tmp/matched_files.txt
 
           echo "== Résumé des différences trouvées =="
           find /tmp/patches -type f | tee /tmp/patches_summary.txt
           for p in /tmp/patches/*.diff; do
-            [ -f "$p" ] && echo "===== $p =====" && cat "$p"
+            if [ -f "$p" ]; then
+              echo "===== $p ====="
+              cat "$p"
+            fi
           done
+          set -e
+          true
 
       - name: Publier le diff comme artefact
         uses: actions/upload-artifact@v4
