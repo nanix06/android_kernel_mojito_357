@@ -111,6 +111,10 @@ jobs:
           ./scripts/config --file out/.config --disable AUTO_KPROFILES_FB
           ./scripts/config --file out/.config --enable AUTO_KPROFILES_NONE
 
+          # Display Features
+          ./scripts/config --file out/.config --enable DRM_MSM_DISPLAY_FEATURES
+          ./scripts/config --file out/.config --enable DISPLAY_FEATURE_OPTION
+
           ./scripts/config --file out/.config \
             --set-str LOCALVERSION "-STRIX❄-SuSFSඞ"
 
