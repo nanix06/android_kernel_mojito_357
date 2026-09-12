@@ -60,7 +60,8 @@ jobs:
           patch -p1 --fuzz=3 < susfs/kernel_patches/kernel-4.14.patch
           patch -p1 --fuzz=3 < susfs/kernel_patches/50_add_susfs_in_kernel-4.14.patch || true
           patch -p1 --fuzz=3 < susfs/kernel_patches/susfs_fix_nameic.patch || true
-          patch -p1 --fuzz=3 < susfs/kernel_patches/fix_stat.c.patch || true
+          patch -p1 --fuzz=3 < susfs/kernel_patches/fix_stat.c.patch
+          grep -q "susfs_def.h" fs/stat.c
           patch -p1 --fuzz=3 < susfs/kernel_patches/55_try_umount_for_susfs.patch || true
 
           # 2. Patch spécifique à KernelSU
@@ -99,6 +100,8 @@ jobs:
           ./scripts/config --file out/.config --enable KSU_SUSFS_SUS_OVERLAYFS
           ./scripts/config --file out/.config --enable KSU_SUSFS_TRY_UMOUNT
           ./scripts/config --file out/.config --enable KSU_SUSFS_SPOOF_UNAME_RELEASE
+          ./scripts/config --file out/.config --enable KSU_SUSFS_SUS_MAP
+          ./scripts/config --file out/.config --enable KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
 
           # KProfiles
           ./scripts/config --file out/.config --enable KPROFILES
@@ -138,7 +141,7 @@ jobs:
           cp out/arch/arm64/boot/Image release/ 2>/dev/null || true
           sha256sum release/* > release/SHA256SUMS
 
-      - name: Envoyer l’artefact
+      - name: Envoyer l'artefact
         uses: actions/upload-artifact@v4
         with:
           name: Mojito-STRIX-KernelSU
